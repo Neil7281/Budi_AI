@@ -45,12 +45,13 @@ from app.camera import Camera
 from app.monitor import get_system_stats, get_jetson_model
 from app.pipeline import (
     SAMPLE_RATE, TTS_BREAKS, MicRecorder, warmup_stt, vad_loop,
-    tts_player, load_silero,
+    tts_player, load_silero, play_audio,
 )
 from app.reachy import kill_stale_camera_holders, connect as connect_reachy
 from app.emotion import EmotionDetector
 from app.movements import MovementController
 from app.distraction import DistractionMonitor
+from app.scheduler import Scheduler, parse_reminder, parse_cancel
 from app.web import Broadcaster, start_web_server
 from rich.console import Console
 from rich.panel import Panel
@@ -259,13 +260,24 @@ def main():
     # ── Distraction monitor (activated by voice command) ─────────
     distraction_monitor = None
     if config.distraction.enabled:
+        def _on_nudge(msg):
+            broadcaster.send({"type": "nudge", "text": msg})
         distraction_monitor = DistractionMonitor(
             llm=llm, camera=cam, tts=tts,
             config=config.distraction,
             pa_sink=None,
             console=console,
+            on_nudge=_on_nudge,
         )
         console.print("  ✓ Distraction monitor ready (say 'focus mode' to activate)")
+
+    # ── Scheduler (voice-activated reminders) ────────────────────
+    def _on_reminder(msg, recurring=False):
+        broadcaster.send({"type": "reminder", "text": msg, "recurring": recurring})
+    scheduler = Scheduler(
+        tts=tts, pa_sink=None, console=console, on_reminder=_on_reminder,
+    )
+    console.print("  ✓ Scheduler ready (say 'remind me in X minutes to...')")
 
     # ── Start mic ────────────────────────────────────────────────
     effective_chunk_ms = 32 if silero_model else config.vad.chunk_ms
@@ -277,6 +289,7 @@ def main():
 
     if distraction_monitor:
         distraction_monitor.pa_sink = mic.pa_sink
+    scheduler.pa_sink = mic.pa_sink
 
     # ── Start web server + background threads ────────────────────
     web_thread = start_web_server(broadcaster, host=web_host, port=web_port)
@@ -376,6 +389,34 @@ def main():
                 mic.resume()
                 continue
 
+            # ── Check for cancel reminders ───────────────────────────
+            if parse_cancel(text):
+                count = scheduler.cancel_recurring()
+                if count > 0:
+                    confirm = f"Done, I cancelled {count} recurring reminder{'s' if count != 1 else ''}."
+                else:
+                    confirm = "You don't have any active recurring reminders to cancel."
+                console.print(f'  [green]You:[/green] "{text}"')
+                console.print(f"  [magenta]Assistant:[/magenta] {confirm}")
+                broadcaster.send({"type": "transcript", "text": text, "stt_time": round(dt_stt, 2), "duration": round(segment.duration, 1), "emotion": None})
+                broadcaster.send({"type": "token", "text": confirm})
+                broadcaster.send({"type": "done", "ttft": 0, "vlm_time": 0, "tokens": len(confirm.split())})
+                broadcaster.send({"type": "status", "stage": "listening"})
+                if tts:
+                    r = tts.synthesize(confirm)
+                    if r.get("audio") is not None:
+                        play_audio(r["audio"], r["sample_rate"], sink=mic.pa_sink)
+                if distraction_monitor:
+                    distraction_monitor.resume()
+                mic.resume()
+                continue
+
+            # ── Check for reminders (parsed + sent to VLM for context) ──
+            reminder_parsed = parse_reminder(text)
+            if reminder_parsed:
+                delay, task, recurring = reminder_parsed
+                scheduler.add(delay, task, recurring=recurring)
+
             # ── Check for focus mode triggers (before filler filter) ──
             distraction_action = None
             if distraction_monitor:
@@ -386,12 +427,9 @@ def main():
                 elif distraction_action == "stop":
                     distraction_monitor.stop()
                     broadcaster.send({"type": "focus", "active": False})
-                elif distraction_action == "excuse":
-                    distraction_monitor.excuse()
-                    broadcaster.send({"type": "focus", "excused": True})
 
             word_count = len(text.split())
-            if word_count <= 2 and "?" not in text and not distraction_action:
+            if word_count <= 2 and "?" not in text and not distraction_action and not reminder_parsed:
                 console.print(f"[dim]  (skipped filler: \"{text}\")[/dim]")
                 broadcaster.send({"type": "status", "stage": "listening"})
                 if distraction_monitor:
@@ -441,8 +479,35 @@ def main():
             t_llm = time.perf_counter()
             ttft = None
 
+            # Add reminder context so VLM knows a reminder was just set
+            llm_prompt = text
+            if reminder_parsed:
+                delay, task, recurring = reminder_parsed
+                from app.scheduler import _format_time
+                time_str = _format_time(delay)
+                if recurring:
+                    llm_prompt = (
+                        f"[SYSTEM: The user just asked you to set a recurring reminder. "
+                        f"You have already set a recurring reminder every {time_str} to '{task}'. "
+                        f"Briefly confirm this naturally. Keep it short and friendly.] {text}"
+                    )
+                else:
+                    llm_prompt = (
+                        f"[SYSTEM: The user just asked you to set a reminder. "
+                        f"You have already set a reminder for {time_str} from now to '{task}'. "
+                        f"Briefly confirm this naturally. Keep it short and friendly.] {text}"
+                    )
+
+            if distraction_monitor:
+                if not distraction_monitor.is_active:
+                    llm_prompt = f"[Focus mode is OFF. Respond normally, no focus behavior.] {llm_prompt}"
+                elif distraction_monitor.is_excused:
+                    llm_prompt = f"[Focus mode is ON but paused. The user asked for a break and you allowed it. Be casual.] {llm_prompt}"
+                else:
+                    llm_prompt = f"[Focus mode is ON. The user is being monitored for distractions.] {llm_prompt}"
+
             for chunk_data in llm.generate_stream(
-                prompt=text, system_prompt=vision_system_prompt,
+                prompt=llm_prompt, system_prompt=vision_system_prompt,
                 images_b64=captured_frames if captured_frames else None,
                 few_shot=vision_few_shot if vision_few_shot else None,
             ):
@@ -488,6 +553,12 @@ def main():
                 timing += " | [cyan]FOCUS[/cyan]"
             timing += "[/dim]"
             console.print(timing)
+
+            # Check if VLM granted an excuse during focus mode
+            if distraction_monitor and distraction_monitor.is_active and full_resp:
+                if distraction_monitor.check_response_for_excuse(full_resp):
+                    broadcaster.send({"type": "focus", "excused": True})
+                    console.print("  [dim]VLM granted pause — distraction checks paused[/dim]")
 
             broadcaster.send({
                 "type": "done",

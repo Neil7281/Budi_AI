@@ -40,7 +40,7 @@ llm:
     Write numbers and units as spoken words when short.
 
 stt:
-  model: "tiny.en"                    # tiny.en, base.en, small.en
+  model: "base.en"                    # tiny.en, base.en, small.en
   device: "cuda"
   compute_type: "int8"
   language: "en"
@@ -84,6 +84,9 @@ vision:
     An image is always attached. Only use the image when the user asks about what you see, colors, objects, or the scene.
     Otherwise ignore the image completely and respond naturally.
     Answer in one short sentence. No markdown or formatting.
+    When a message starts with [Focus mode is ON], you are an accountability buddy.
+    If the user says why they are distracted or asks for a break, always say "go ahead" somewhere in your one sentence response.
+    When a message starts with [Focus mode is OFF], ignore focus mode completely and respond normally.
   few_shot:
     - role: "user"
       content: "Hi!"
@@ -101,42 +104,45 @@ vision:
 distraction:
   enabled: true
   check_interval: 8.0                  # seconds between VLM distraction checks (min ~8s due to inference)
-  frames: 3                            # frames per check (spread over interval for temporal context)
+  frames: 1                            # frames per check (1 to stay within context limit)
   cooldown: 45.0                       # seconds after a nudge before nudging again
   excuse_duration: 120.0               # seconds an excuse lasts ("I need to check my phone")
-  prompt: |
-    These 3 images were taken a few seconds apart. Look at all of them together.
-    Is the person consistently distracted across the images, or focused on their work?
-    Distracted means: looking at phone, looking away from desk, talking to someone else, daydreaming, eyes closed, not engaged with the task.
-    NOT distracted: picking up a pen, stretching briefly, drinking water, adjusting chair, reading something on desk.
-    Reply ONLY one word. No explanation. No description of the scene. Just: DISTRACTED or FOCUSED.
+  prompt: "Look at this image. Is the person looking at their phone, looking away from their work, or not paying attention? If yes, answer DISTRACTED. If they are working or looking at their desk, answer FOCUSED. One word only."
   nudge_messages:
-    - "Hey, you seem a bit distracted. Stay focused!"
-    - "Just checking in, are you still with me?"
-    - "Looks like your attention drifted. Lets get back to it."
+    - "Hey! Eyes on the prize, not the phone!"
+    - "I can see you drifting. Come back to me!"
+    - "Focus! You activated me for a reason, remember?"
+    - "Uh oh, someone is getting distracted again."
+    - "You are not fooling anyone. Back to work!"
+    - "I am watching you! Stay on track."
+    - "Did you forget I am here? Focus up!"
+    - "That does not look like work to me."
+    - "Bzzzt! Distraction detected. Refocusing in three, two, one."
+    - "Your future self will thank you for staying focused right now."
   start_phrases:
-    - "focus mode"
-    - "no distraction"
-    - "help me focus"
-    - "keep me focused"
-    - "monitor me"
+    - "activate focus mode"
   stop_phrases:
-    - "stop focus"
-    - "turn off focus"
-    - "im done"
-    - "end focus"
-    - "stop monitoring"
+    - "stop focus mode"
   excuse_phrases:
     - "need to check"
+    - "need to send"
+    - "need to answer"
+    - "need to reply"
+    - "need to respond"
+    - "need to look at"
     - "answer this"
     - "one moment"
     - "one second"
     - "hold on"
     - "give me a minute"
+    - "give me a sec"
     - "be right back"
     - "brb"
     - "need to take"
     - "let me just"
+    - "just a moment"
+    - "just a second"
+    - "quick break"
 
 emotion:
   enabled: true                       # enable sentiment-based emotion detection + reactive movements
