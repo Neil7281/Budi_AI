@@ -76,7 +76,8 @@ if [ -f "$MODEL" ]; then
         -ngl 999 -c "$CTX" -np "$NP" -fa on --cache-reuse 256 $EXTRA_ARGS
 else
     HF_CACHE="$HOME/.cache/huggingface"
-    mkdir -p "$HF_CACHE"
+    LLAMA_CACHE="$HOME/.cache/llama.cpp"
+    mkdir -p "$HF_CACHE" "$LLAMA_CACHE"
     echo "Model : $MODEL (HuggingFace)"
     echo "Port  : $PORT"
     echo ""
@@ -85,6 +86,7 @@ else
         --runtime=nvidia \
         -p "${PORT}:8080" \
         -v "$HF_CACHE:/root/.cache/huggingface" \
+        -v "$LLAMA_CACHE:/root/.cache/llama.cpp" \
         -e NVIDIA_VISIBLE_DEVICES=all \
         -e NVIDIA_DRIVER_CAPABILITIES=compute,utility \
         "$IMAGE" \

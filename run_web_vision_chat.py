@@ -50,6 +50,7 @@ from app.pipeline import (
 from app.reachy import kill_stale_camera_holders, connect as connect_reachy
 from app.emotion import EmotionDetector
 from app.movements import MovementController
+from app.distraction import DistractionMonitor
 from app.web import Broadcaster, start_web_server
 from rich.console import Console
 from rich.panel import Panel
@@ -234,6 +235,7 @@ def main():
 
     tts = create_tts(
         voice=config.tts.voice, speed=config.tts.speed, lang=config.tts.lang,
+        backend=config.tts.backend,
     )
     tts = tts if tts.load() else None
     if tts:
@@ -254,6 +256,17 @@ def main():
             console.print("  ⚠ Emotion detector unavailable")
             emotion_detector = None
 
+    # ── Distraction monitor (activated by voice command) ─────────
+    distraction_monitor = None
+    if config.distraction.enabled:
+        distraction_monitor = DistractionMonitor(
+            llm=llm, camera=cam, tts=tts,
+            config=config.distraction,
+            pa_sink=None,
+            console=console,
+        )
+        console.print("  ✓ Distraction monitor ready (say 'focus mode' to activate)")
+
     # ── Start mic ────────────────────────────────────────────────
     effective_chunk_ms = 32 if silero_model else config.vad.chunk_ms
     mic = MicRecorder(console, chunk_ms=effective_chunk_ms)
@@ -261,6 +274,9 @@ def main():
         console.print("[red]Cannot start recording! Check mic.[/red]")
         cam.close()
         return
+
+    if distraction_monitor:
+        distraction_monitor.pa_sink = mic.pa_sink
 
     # ── Start web server + background threads ────────────────────
     web_thread = start_web_server(broadcaster, host=web_host, port=web_port)
@@ -329,6 +345,10 @@ def main():
                 mic.resume()
                 continue
 
+            # Pause distraction checks while handling conversation
+            if distraction_monitor:
+                distraction_monitor.pause()
+
             broadcaster.send({"type": "status", "stage": "transcribing"})
 
             t_cam = time.perf_counter()
@@ -351,13 +371,31 @@ def main():
                     f"rms={segment.rms:.4f}{', err='+err if err else ''})[/dim]"
                 )
                 broadcaster.send({"type": "status", "stage": "listening"})
+                if distraction_monitor:
+                    distraction_monitor.resume()
                 mic.resume()
                 continue
 
+            # ── Check for focus mode triggers (before filler filter) ──
+            distraction_action = None
+            if distraction_monitor:
+                distraction_action = distraction_monitor.check_text(text)
+                if distraction_action == "start":
+                    distraction_monitor.start()
+                    broadcaster.send({"type": "focus", "active": True})
+                elif distraction_action == "stop":
+                    distraction_monitor.stop()
+                    broadcaster.send({"type": "focus", "active": False})
+                elif distraction_action == "excuse":
+                    distraction_monitor.excuse()
+                    broadcaster.send({"type": "focus", "excused": True})
+
             word_count = len(text.split())
-            if word_count <= 2 and "?" not in text:
+            if word_count <= 2 and "?" not in text and not distraction_action:
                 console.print(f"[dim]  (skipped filler: \"{text}\")[/dim]")
                 broadcaster.send({"type": "status", "stage": "listening"})
+                if distraction_monitor:
+                    distraction_monitor.resume()
                 mic.resume()
                 continue
 
@@ -446,6 +484,8 @@ def main():
             else:
                 timing += " | VLM no response"
             timing += emotion_tag
+            if distraction_monitor and distraction_monitor.is_active:
+                timing += " | [cyan]FOCUS[/cyan]"
             timing += "[/dim]"
             console.print(timing)
 
@@ -454,9 +494,13 @@ def main():
                 "ttft": round(ttft, 2) if ttft else None,
                 "vlm_time": round(dt_llm, 2),
                 "tokens": toks,
+                "focus_mode": distraction_monitor.is_active if distraction_monitor else False,
             })
             broadcaster.send({"type": "status", "stage": "listening"})
 
+            # Resume distraction checks after conversation turn
+            if distraction_monitor:
+                distraction_monitor.resume()
             mic.resume()
 
     except (KeyboardInterrupt, SystemExit):
@@ -465,6 +509,8 @@ def main():
         pass
 
     _do_cleanup()
+    if distraction_monitor:
+        distraction_monitor.stop()
     if mover:
         mover.reset()
     try:

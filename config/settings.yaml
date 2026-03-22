@@ -40,18 +40,20 @@ llm:
     Write numbers and units as spoken words when short.
 
 stt:
-  model: "small.en"                   # tiny.en, base.en, small.en
+  model: "tiny.en"                    # tiny.en, base.en, small.en
   device: "cuda"
   compute_type: "int8"
   language: "en"
   beam_size: 1                        # 1=greedy (fast), 5=beam (quality)
 
 tts:
-  voice: "af_bella"                   # kokoro voices: af_sarah, af_bella, am_adam, bf_emma, bm_george, etc.
+  backend: "edge"                     # "kokoro" (local ONNX) or "edge" (Microsoft cloud TTS)
+  voice: "jenny"                      # edge voices: jenny, aria, guy, sara, andrew, emma, brian, sonia, ryan
+                                      # kokoro voices: af_sarah, af_bella, am_adam, bf_emma, bm_george
   speed: 1.0
-  lang: "en-us"                       # kokoro language code
-  first_chunk_words: 3                # words before first TTS chunk is sent
-  max_chunk_words: 8                  # max words per TTS chunk
+  lang: "en-us"
+  first_chunk_words: 8                # words before first TTS chunk is sent (higher for edge TTS)
+  max_chunk_words: 25                 # max words per TTS chunk (higher = smoother for cloud TTS)
 
 audio:
   sample_rate: 16000
@@ -71,9 +73,9 @@ vad:
 
 vision:
   camera_device: 1                    # /dev/video1
-  width: 640
-  height: 480
-  jpeg_quality: 80                    # JPEG compression (lower = smaller payload)
+  width: 320
+  height: 240
+  jpeg_quality: 60                    # JPEG compression (lower = smaller payload, faster VLM)
   frames: 1                           # max frames to send per utterance
   capture_fps: 3.0                    # background capture rate (frames/sec)
   system_prompt: |

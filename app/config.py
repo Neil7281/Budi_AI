@@ -45,6 +45,7 @@ class STTConfig:
 
 @dataclass
 class TTSConfig:
+    backend: str = "kokoro"    # "kokoro" (local) or "edge" (Microsoft cloud)
     voice: str = "af_sarah"
     speed: float = 1.0
     lang: str = "en-us"

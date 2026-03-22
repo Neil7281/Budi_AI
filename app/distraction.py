@@ -5,13 +5,22 @@ Uses the VLM with multiple camera frames to detect sustained distraction.
 Respects user excuses ("I need to check my phone") and pauses during conversation.
 """
 
+import base64
 import random
 import threading
 import time
 from typing import Optional
 
+import cv2
+import numpy as np
+
 from app.config import DistractionConfig
 from app.pipeline import play_audio
+
+# Smaller resolution for distraction checks — reduces token count significantly
+_DISTRACTION_WIDTH = 320
+_DISTRACTION_HEIGHT = 240
+_DISTRACTION_JPEG_QUALITY = 50
 
 
 class DistractionMonitor:
@@ -131,13 +140,9 @@ class DistractionMonitor:
             if time.monotonic() - self._last_nudge < self.config.cooldown:
                 continue
 
-            # Grab frames from ring buffer
+            # Grab frames from ring buffer and downscale for faster inference
             now = time.monotonic()
-            frames = self.camera.get_speech_frames(
-                speech_start=now - self.config.check_interval,
-                speech_end=now,
-                max_frames=self.config.frames,
-            )
+            frames = self._grab_small_frames(now)
 
             if not frames:
                 continue
@@ -154,6 +159,38 @@ class DistractionMonitor:
 
             if result == "DISTRACTED":
                 self._nudge()
+
+    def _grab_small_frames(self, now: float) -> list[str]:
+        """Grab frames from ring buffer, downscale to reduce token usage."""
+        with self.camera._lock:
+            candidates = [
+                (t, f) for t, f in self.camera._ring
+                if (now - self.config.check_interval) <= t <= now
+            ]
+
+        if not candidates:
+            with self.camera._lock:
+                if self.camera._ring:
+                    candidates = [(self.camera._ring[-1][0], self.camera._ring[-1][1])]
+                else:
+                    return []
+
+        # Evenly sample across the window
+        max_frames = self.config.frames
+        if len(candidates) <= max_frames:
+            selected = [f for _, f in candidates]
+        else:
+            step = len(candidates) / max_frames
+            selected = [candidates[int(i * step)][1] for i in range(max_frames)]
+
+        # Downscale and re-encode as small JPEG
+        result = []
+        for frame in selected:
+            small = cv2.resize(frame, (_DISTRACTION_WIDTH, _DISTRACTION_HEIGHT))
+            ok, jpg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, _DISTRACTION_JPEG_QUALITY])
+            if ok:
+                result.append(base64.b64encode(jpg.tobytes()).decode("ascii"))
+        return result
 
     def _query_vlm(self, frames: list[str]) -> str:
         """Send frames to VLM with distraction prompt. Returns DISTRACTED or FOCUSED."""

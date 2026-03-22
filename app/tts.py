@@ -192,7 +192,120 @@ class KokoroTTS:
             self._proc = None
 
 
+class EdgeTTS:
+    """Microsoft Edge TTS — streams audio from Microsoft's cloud service."""
+
+    def __init__(self, voice: str = "en-US-JennyNeural", speed: float = 1.0, lang: str = "en-us"):
+        self.voice = voice
+        self.speed = speed
+        self.lang = lang
+        self._sample_rate = 24000
+        self.backend_name = "Edge"
+        self.provider = "cloud"
+        self._loaded = False
+
+    def load(self) -> bool:
+        try:
+            import edge_tts
+            self._loaded = True
+            return True
+        except ImportError:
+            print("Edge TTS: install edge-tts (pip install edge-tts)")
+            return False
+
+    def synthesize(self, text: str) -> Dict[str, Any]:
+        if not text.strip():
+            return {"audio": None, "error": "Empty"}
+        if not self._loaded:
+            return {"audio": None, "error": "Not loaded"}
+
+        try:
+            import asyncio
+            import edge_tts
+            import io
+
+            rate_str = f"{int((self.speed - 1.0) * 100):+d}%"
+
+            async def _generate():
+                communicate = edge_tts.Communicate(text, self.voice, rate=rate_str)
+                audio_data = b""
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio_data += chunk["data"]
+                return audio_data
+
+            # Run async in sync context
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        mp3_data = pool.submit(lambda: asyncio.run(_generate())).result(timeout=30)
+                else:
+                    mp3_data = loop.run_until_complete(_generate())
+            except RuntimeError:
+                mp3_data = asyncio.run(_generate())
+
+            if not mp3_data:
+                return {"audio": None, "error": "No audio returned"}
+
+            # Decode MP3 to PCM using subprocess (ffmpeg/avconv)
+            proc = subprocess.Popen(
+                ["ffmpeg", "-i", "pipe:0", "-f", "s16le", "-ar", "24000",
+                 "-ac", "1", "-loglevel", "error", "pipe:1"],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            pcm_data, err = proc.communicate(input=mp3_data, timeout=15)
+
+            if proc.returncode != 0 or not pcm_data:
+                return {"audio": None, "error": f"ffmpeg decode failed: {err.decode()[:100]}"}
+
+            audio = np.frombuffer(pcm_data, dtype=np.int16)
+            return {"audio": audio, "sample_rate": 24000}
+
+        except Exception as e:
+            return {"audio": None, "error": str(e)}
+
+    def synthesize_to_file(self, text: str, path: str) -> bool:
+        r = self.synthesize(text)
+        if r.get("audio") is None:
+            return False
+        with wave.open(path, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(r["sample_rate"])
+            wf.writeframes(r["audio"].tobytes())
+        return True
+
+    def health_check(self) -> bool:
+        return self._loaded
+
+    def unload(self):
+        self._loaded = False
+
+
+# Edge TTS voice mapping for convenience
+EDGE_VOICES = {
+    "jenny": "en-US-JennyNeural",
+    "aria": "en-US-AriaNeural",
+    "guy": "en-US-GuyNeural",
+    "sara": "en-US-SaraNeural",
+    "andrew": "en-US-AndrewNeural",
+    "emma": "en-US-EmmaNeural",
+    "brian": "en-US-BrianNeural",
+    "sonia": "en-GB-SoniaNeural",
+    "ryan": "en-GB-RyanNeural",
+}
+
+
 def create_tts(voice: str = "", speed: float = 1.0, lang: str = "en-us",
-               **_kwargs):
-    """Create the TTS backend (Kokoro, subprocess-isolated)."""
+               backend: str = "kokoro", **_kwargs):
+    """Create the TTS backend.
+
+    backend: "kokoro" (local ONNX) or "edge" (Microsoft Edge cloud TTS)
+    """
+    if backend == "edge":
+        # Resolve short voice names
+        resolved = EDGE_VOICES.get(voice.lower(), voice) if voice else "en-US-JennyNeural"
+        return EdgeTTS(voice=resolved, speed=speed, lang=lang)
     return KokoroTTS(voice=voice or "af_sarah", speed=speed, lang=lang)

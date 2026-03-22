@@ -167,6 +167,7 @@ def main():
 
     tts = create_tts(
         voice=config.tts.voice, speed=config.tts.speed, lang=config.tts.lang,
+        backend=config.tts.backend,
     )
     tts = tts if tts.load() else None
     if tts:
