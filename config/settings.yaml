@@ -47,7 +47,7 @@ stt:
   beam_size: 1                        # 1=greedy (fast), 5=beam (quality)
 
 tts:
-  voice: "af_sarah"                   # kokoro voices: af_sarah, af_bella, am_adam, bf_emma, bm_george, etc.
+  voice: "af_bella"                   # kokoro voices: af_sarah, af_bella, am_adam, bf_emma, bm_george, etc.
   speed: 1.0
   lang: "en-us"                       # kokoro language code
   first_chunk_words: 3                # words before first TTS chunk is sent
@@ -95,6 +95,46 @@ vision:
       content: "Okay, bye!"
     - role: "assistant"
       content: "Goodbye, see you later!"
+
+distraction:
+  enabled: true
+  check_interval: 8.0                  # seconds between VLM distraction checks (min ~8s due to inference)
+  frames: 3                            # frames per check (spread over interval for temporal context)
+  cooldown: 45.0                       # seconds after a nudge before nudging again
+  excuse_duration: 120.0               # seconds an excuse lasts ("I need to check my phone")
+  prompt: |
+    These 3 images were taken a few seconds apart. Look at all of them together.
+    Is the person consistently distracted across the images, or focused on their work?
+    Distracted means: looking at phone, looking away from desk, talking to someone else, daydreaming, eyes closed, not engaged with the task.
+    NOT distracted: picking up a pen, stretching briefly, drinking water, adjusting chair, reading something on desk.
+    Reply ONLY one word. No explanation. No description of the scene. Just: DISTRACTED or FOCUSED.
+  nudge_messages:
+    - "Hey, you seem a bit distracted. Stay focused!"
+    - "Just checking in, are you still with me?"
+    - "Looks like your attention drifted. Lets get back to it."
+  start_phrases:
+    - "focus mode"
+    - "no distraction"
+    - "help me focus"
+    - "keep me focused"
+    - "monitor me"
+  stop_phrases:
+    - "stop focus"
+    - "turn off focus"
+    - "im done"
+    - "end focus"
+    - "stop monitoring"
+  excuse_phrases:
+    - "need to check"
+    - "answer this"
+    - "one moment"
+    - "one second"
+    - "hold on"
+    - "give me a minute"
+    - "be right back"
+    - "brb"
+    - "need to take"
+    - "let me just"
 
 emotion:
   enabled: true                       # enable sentiment-based emotion detection + reactive movements

@@ -101,6 +101,36 @@ class ReachyConfig:
 
 
 @dataclass
+class DistractionConfig:
+    enabled: bool = True
+    check_interval: float = 8.0
+    frames: int = 2
+    cooldown: float = 45.0
+    excuse_duration: float = 120.0
+    prompt: str = (
+        "These images were taken a few seconds apart. Is the person consistently distracted "
+        "(looking away, on their phone, not engaged) or focused on the task? "
+        "Brief actions like picking something up or stretching do NOT count as distracted. "
+        "Answer exactly one word: DISTRACTED or FOCUSED."
+    )
+    nudge_messages: List[str] = field(default_factory=lambda: [
+        "Hey, you seem a bit distracted. Stay focused!",
+        "Just checking in, are you still with me?",
+        "Looks like your attention drifted. Lets get back to it.",
+    ])
+    start_phrases: List[str] = field(default_factory=lambda: [
+        "focus mode", "no distraction", "help me focus", "keep me focused", "monitor me",
+    ])
+    stop_phrases: List[str] = field(default_factory=lambda: [
+        "stop focus", "turn off focus", "im done", "end focus", "stop monitoring",
+    ])
+    excuse_phrases: List[str] = field(default_factory=lambda: [
+        "need to check", "answer this", "one moment", "one second", "hold on",
+        "give me a minute", "be right back", "brb", "need to take", "let me just",
+    ])
+
+
+@dataclass
 class EmotionConfig:
     enabled: bool = True
 
@@ -134,6 +164,7 @@ _SECTIONS = [
     ("vad", "vad", VADConfig),
     ("vision", "vision", VisionConfig),
     ("reachy", "reachy", ReachyConfig),
+    ("distraction", "distraction", DistractionConfig),
     ("emotion", "emotion", EmotionConfig),
     ("rag", "rag", RAGConfig),
     ("web", "web", WebConfig),
@@ -149,6 +180,7 @@ class Config:
     vad: VADConfig = field(default_factory=VADConfig)
     vision: VisionConfig = field(default_factory=VisionConfig)
     reachy: ReachyConfig = field(default_factory=ReachyConfig)
+    distraction: DistractionConfig = field(default_factory=DistractionConfig)
     emotion: EmotionConfig = field(default_factory=EmotionConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
     web: WebConfig = field(default_factory=WebConfig)

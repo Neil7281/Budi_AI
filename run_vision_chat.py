@@ -43,6 +43,7 @@ from app.pipeline import (
 from app.reachy import kill_stale_camera_holders, connect as connect_reachy
 from app.emotion import EmotionDetector
 from app.movements import MovementController
+from app.distraction import DistractionMonitor
 from rich.console import Console
 from rich.panel import Panel
 
@@ -186,6 +187,17 @@ def main():
             console.print("  ⚠ Emotion detector unavailable")
             emotion_detector = None
 
+    # ── Distraction monitor (activated by voice command) ─────────
+    distraction_monitor = None
+    if config.distraction.enabled:
+        distraction_monitor = DistractionMonitor(
+            llm=llm, camera=cam, tts=tts,
+            config=config.distraction,
+            pa_sink=None,  # pa_sink set after mic starts
+            console=console,
+        )
+        console.print("  ✓ Distraction monitor ready (say 'focus mode' to activate)")
+
     # ── Start mic ────────────────────────────────────────────────
     effective_chunk_ms = 32 if silero_model else config.vad.chunk_ms
     mic = MicRecorder(console, chunk_ms=effective_chunk_ms)
@@ -193,6 +205,9 @@ def main():
         console.print("[red]Cannot start recording! Check mic.[/red]")
         cam.close()
         return
+
+    if distraction_monitor:
+        distraction_monitor.pa_sink = mic.pa_sink
 
     n_frames = config.vision.frames
     n_fewshot = len(vision_few_shot) // 2
@@ -205,6 +220,10 @@ def main():
     # ── Main loop ────────────────────────────────────────────────
     try:
         for segment in vad_loop(mic, console, vad_cfg=config.vad, silero=silero_model):
+            # Pause distraction checks while handling conversation
+            if distraction_monitor:
+                distraction_monitor.pause()
+
             t_cam = time.perf_counter()
             captured_frames = cam.get_speech_frames(
                 speech_start=segment.start_time,
@@ -224,12 +243,27 @@ def main():
                     f"[dim]  (not recognized — {segment.duration:.1f}s, "
                     f"rms={segment.rms:.4f}{', err='+err if err else ''})[/dim]"
                 )
+                if distraction_monitor:
+                    distraction_monitor.resume()
                 mic.resume()
                 continue
 
+            # ── Check for focus mode triggers (before filler filter) ──
+            distraction_action = None
+            if distraction_monitor:
+                distraction_action = distraction_monitor.check_text(text)
+                if distraction_action == "start":
+                    distraction_monitor.start()
+                elif distraction_action == "stop":
+                    distraction_monitor.stop()
+                elif distraction_action == "excuse":
+                    distraction_monitor.excuse()
+
             word_count = len(text.split())
-            if word_count <= 2 and "?" not in text:
+            if word_count <= 2 and "?" not in text and not distraction_action:
                 console.print(f"[dim]  (skipped filler: \"{text}\")[/dim]")
+                if distraction_monitor:
+                    distraction_monitor.resume()
                 mic.resume()
                 continue
 
@@ -267,9 +301,14 @@ def main():
             else:
                 timing += " | VLM no response"
             timing += emotion_tag
+            if distraction_monitor and distraction_monitor.is_active:
+                timing += " | [cyan]FOCUS[/cyan]"
             timing += "[/dim]"
             console.print(timing)
 
+            # Resume distraction checks after conversation turn
+            if distraction_monitor:
+                distraction_monitor.resume()
             mic.resume()
 
     except (KeyboardInterrupt, SystemExit):
@@ -278,6 +317,8 @@ def main():
         pass
 
     _do_cleanup()
+    if distraction_monitor:
+        distraction_monitor.stop()
     if mover:
         mover.reset()
     try:
