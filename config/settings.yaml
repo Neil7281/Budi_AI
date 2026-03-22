@@ -136,6 +136,21 @@ distraction:
     - "need to take"
     - "let me just"
 
+safety:
+  enabled: true                           # set true + run a second llama.cpp server on port 8081
+  check_interval: 5.0                     # seconds between safety checks
+  cooldown: 60.0                          # seconds between repeated alerts
+  confirm_count: 3                        # consecutive YES detections required before alerting
+  frames: 1                               # frames per check (1 is enough for safety)
+  model_endpoint: "http://localhost:8081"  # dedicated small VLM server (recommend SmolVLM2-2.2B)
+  model_backend: "openai"                 # "openai" (llama.cpp) or "ollama"
+  prompt: "Is anyone in danger in this image? Answer only YES or NO."
+  alert_prefix: "Safety alert!"
+  alert_messages:
+    - "Warning! I detect a potential safety concern. {description}. Please be careful."
+    - "Attention! {description}. Please take immediate action."
+    - "Alert! I noticed something concerning. {description}. Stay safe."
+
 emotion:
   enabled: true                       # enable sentiment-based emotion detection + reactive movements
 

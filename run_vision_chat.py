@@ -44,6 +44,7 @@ from app.reachy import kill_stale_camera_holders, connect as connect_reachy
 from app.emotion import EmotionDetector
 from app.movements import MovementController
 from app.distraction import DistractionMonitor
+from app.safety import SafetyMonitor
 from rich.console import Console
 from rich.panel import Panel
 
@@ -198,6 +199,19 @@ def main():
         )
         console.print("  ✓ Distraction monitor ready (say 'focus mode' to activate)")
 
+    # ── Safety monitor (always-on, dedicated VLM) ─────────────────
+    safety_monitor = None
+    if config.safety.enabled:
+        safety_monitor = SafetyMonitor(
+            camera=cam, tts=tts,
+            config=config.safety,
+            console=console,
+        )
+        if safety_monitor.load():
+            console.print("  ✓ Safety monitor ready")
+        else:
+            safety_monitor = None
+
     # ── Start mic ────────────────────────────────────────────────
     effective_chunk_ms = 32 if silero_model else config.vad.chunk_ms
     mic = MicRecorder(console, chunk_ms=effective_chunk_ms)
@@ -208,6 +222,10 @@ def main():
 
     if distraction_monitor:
         distraction_monitor.pa_sink = mic.pa_sink
+
+    if safety_monitor:
+        safety_monitor.pa_sink = mic.pa_sink
+        safety_monitor.start()
 
     n_frames = config.vision.frames
     n_fewshot = len(vision_few_shot) // 2
@@ -220,9 +238,11 @@ def main():
     # ── Main loop ────────────────────────────────────────────────
     try:
         for segment in vad_loop(mic, console, vad_cfg=config.vad, silero=silero_model):
-            # Pause distraction checks while handling conversation
+            # Pause background monitors while handling conversation
             if distraction_monitor:
                 distraction_monitor.pause()
+            if safety_monitor:
+                safety_monitor.pause()
 
             t_cam = time.perf_counter()
             captured_frames = cam.get_speech_frames(
@@ -245,6 +265,8 @@ def main():
                 )
                 if distraction_monitor:
                     distraction_monitor.resume()
+                if safety_monitor:
+                    safety_monitor.resume()
                 mic.resume()
                 continue
 
@@ -264,6 +286,8 @@ def main():
                 console.print(f"[dim]  (skipped filler: \"{text}\")[/dim]")
                 if distraction_monitor:
                     distraction_monitor.resume()
+                if safety_monitor:
+                    safety_monitor.resume()
                 mic.resume()
                 continue
 
@@ -306,9 +330,11 @@ def main():
             timing += "[/dim]"
             console.print(timing)
 
-            # Resume distraction checks after conversation turn
+            # Resume background monitors after conversation turn
             if distraction_monitor:
                 distraction_monitor.resume()
+            if safety_monitor:
+                safety_monitor.resume()
             mic.resume()
 
     except (KeyboardInterrupt, SystemExit):
@@ -317,6 +343,8 @@ def main():
         pass
 
     _do_cleanup()
+    if safety_monitor:
+        safety_monitor.stop()
     if distraction_monitor:
         distraction_monitor.stop()
     if mover:

@@ -131,6 +131,26 @@ class DistractionConfig:
 
 
 @dataclass
+class SafetyConfig:
+    enabled: bool = False
+    check_interval: float = 3.0
+    cooldown: float = 30.0
+    confirm_count: int = 3
+    frames: int = 1
+    model_endpoint: str = "http://localhost:8081"
+    model_backend: str = "openai"
+    prompt: str = (
+        "Is anyone in danger in this image? Answer only YES or NO."
+    )
+    alert_prefix: str = "Safety alert!"
+    alert_messages: List[str] = field(default_factory=lambda: [
+        "Warning! I detect a potential safety concern. {description}. Please be careful.",
+        "Attention! {description}. Please take immediate action.",
+        "Alert! I noticed something concerning. {description}. Stay safe.",
+    ])
+
+
+@dataclass
 class EmotionConfig:
     enabled: bool = True
 
@@ -165,6 +185,7 @@ _SECTIONS = [
     ("vision", "vision", VisionConfig),
     ("reachy", "reachy", ReachyConfig),
     ("distraction", "distraction", DistractionConfig),
+    ("safety", "safety", SafetyConfig),
     ("emotion", "emotion", EmotionConfig),
     ("rag", "rag", RAGConfig),
     ("web", "web", WebConfig),
@@ -181,6 +202,7 @@ class Config:
     vision: VisionConfig = field(default_factory=VisionConfig)
     reachy: ReachyConfig = field(default_factory=ReachyConfig)
     distraction: DistractionConfig = field(default_factory=DistractionConfig)
+    safety: SafetyConfig = field(default_factory=SafetyConfig)
     emotion: EmotionConfig = field(default_factory=EmotionConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
     web: WebConfig = field(default_factory=WebConfig)

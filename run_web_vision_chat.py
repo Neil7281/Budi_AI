@@ -50,6 +50,7 @@ from app.pipeline import (
 from app.reachy import kill_stale_camera_holders, connect as connect_reachy
 from app.emotion import EmotionDetector
 from app.movements import MovementController
+from app.safety import SafetyMonitor
 from app.web import Broadcaster, start_web_server
 from rich.console import Console
 from rich.panel import Panel
@@ -254,6 +255,20 @@ def main():
             console.print("  ⚠ Emotion detector unavailable")
             emotion_detector = None
 
+    # ── Safety monitor (always-on, dedicated VLM) ─────────────────
+    safety_monitor = None
+    if config.safety.enabled:
+        safety_monitor = SafetyMonitor(
+            camera=cam, tts=tts,
+            config=config.safety,
+            console=console,
+            on_alert=lambda msg: broadcaster.send(msg),
+        )
+        if safety_monitor.load():
+            console.print("  ✓ Safety monitor ready")
+        else:
+            safety_monitor = None
+
     # ── Start mic ────────────────────────────────────────────────
     effective_chunk_ms = 32 if silero_model else config.vad.chunk_ms
     mic = MicRecorder(console, chunk_ms=effective_chunk_ms)
@@ -261,6 +276,10 @@ def main():
         console.print("[red]Cannot start recording! Check mic.[/red]")
         cam.close()
         return
+
+    if safety_monitor:
+        safety_monitor.pa_sink = mic.pa_sink
+        safety_monitor.start()
 
     # ── Start web server + background threads ────────────────────
     web_thread = start_web_server(broadcaster, host=web_host, port=web_port)
@@ -329,6 +348,10 @@ def main():
                 mic.resume()
                 continue
 
+            # Pause safety monitor during conversation turn
+            if safety_monitor:
+                safety_monitor.pause()
+
             broadcaster.send({"type": "status", "stage": "transcribing"})
 
             t_cam = time.perf_counter()
@@ -351,6 +374,8 @@ def main():
                     f"rms={segment.rms:.4f}{', err='+err if err else ''})[/dim]"
                 )
                 broadcaster.send({"type": "status", "stage": "listening"})
+                if safety_monitor:
+                    safety_monitor.resume()
                 mic.resume()
                 continue
 
@@ -358,6 +383,8 @@ def main():
             if word_count <= 2 and "?" not in text:
                 console.print(f"[dim]  (skipped filler: \"{text}\")[/dim]")
                 broadcaster.send({"type": "status", "stage": "listening"})
+                if safety_monitor:
+                    safety_monitor.resume()
                 mic.resume()
                 continue
 
@@ -457,6 +484,9 @@ def main():
             })
             broadcaster.send({"type": "status", "stage": "listening"})
 
+            # Resume safety monitor after turn
+            if safety_monitor:
+                safety_monitor.resume()
             mic.resume()
 
     except (KeyboardInterrupt, SystemExit):
@@ -465,6 +495,8 @@ def main():
         pass
 
     _do_cleanup()
+    if safety_monitor:
+        safety_monitor.stop()
     if mover:
         mover.reset()
     try:
