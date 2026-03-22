@@ -31,26 +31,40 @@ class Reminder:
 class Scheduler:
     """Voice-activated reminder scheduler with recurring support."""
 
-    def __init__(self, tts=None, pa_sink=None, console=None, on_reminder=None):
+    def __init__(self, tts=None, pa_sink=None, console=None, on_reminder=None, on_set=None):
         self.tts = tts
         self.pa_sink = pa_sink
         self.console = console
-        self.on_reminder = on_reminder  # callback(msg) for web UI
+        self.on_reminder = on_reminder  # callback(msg, recurring) for web UI
+        self.on_set = on_set            # callback(id, task, delay, recurring) when reminder created
         self._reminders: list[Reminder] = []
         self._lock = threading.Lock()
         self._alive = True
+        self._next_id = 0
         self._thread = threading.Thread(target=self._check_loop, daemon=True)
         self._thread.start()
 
+    def _gen_id(self) -> int:
+        self._next_id += 1
+        return self._next_id
+
     def add(self, delay_seconds: float, message: str, recurring: bool = False):
         """Add a reminder that fires after delay_seconds. If recurring, it repeats."""
+        rid = self._gen_id()
         r = Reminder(delay_seconds, message, time.monotonic(), recurring=recurring)
+        r.id = rid
         with self._lock:
             self._reminders.append(r)
         time_str = _format_time(delay_seconds)
         prefix = "Recurring reminder" if recurring else "Reminder"
         if self.console:
             self.console.print(f"  [cyan]{prefix} set: \"{message}\" {'every' if recurring else 'in'} {time_str}[/cyan]")
+
+        if self.on_set:
+            try:
+                self.on_set(rid, message, delay_seconds, recurring)
+            except Exception:
+                pass
 
     def cancel_recurring(self, keyword: str = None) -> int:
         """Cancel recurring reminders. If keyword given, only those matching."""

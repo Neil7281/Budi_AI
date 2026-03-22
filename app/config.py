@@ -107,7 +107,6 @@ class DistractionConfig:
     check_interval: float = 8.0
     frames: int = 2
     cooldown: float = 45.0
-    excuse_duration: float = 120.0
     prompt: str = (
         "These images were taken a few seconds apart. Is the person consistently distracted "
         "(looking away, on their phone, not engaged) or focused on the task? "
@@ -124,10 +123,6 @@ class DistractionConfig:
     ])
     stop_phrases: List[str] = field(default_factory=lambda: [
         "stop focus", "turn off focus", "im done", "end focus", "stop monitoring",
-    ])
-    excuse_phrases: List[str] = field(default_factory=lambda: [
-        "need to check", "answer this", "one moment", "one second", "hold on",
-        "give me a minute", "be right back", "brb", "need to take", "let me just",
     ])
 
 

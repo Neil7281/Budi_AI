@@ -274,8 +274,10 @@ def main():
     # ── Scheduler (voice-activated reminders) ────────────────────
     def _on_reminder(msg, recurring=False):
         broadcaster.send({"type": "reminder", "text": msg, "recurring": recurring})
+    def _on_reminder_set(rid, task, delay, recurring):
+        broadcaster.send({"type": "reminder_set", "id": rid, "task": task, "delay": delay, "recurring": recurring})
     scheduler = Scheduler(
-        tts=tts, pa_sink=None, console=console, on_reminder=_on_reminder,
+        tts=tts, pa_sink=None, console=console, on_reminder=_on_reminder, on_set=_on_reminder_set,
     )
     console.print("  ✓ Scheduler ready (say 'remind me in X minutes to...')")
 
@@ -392,6 +394,7 @@ def main():
             # ── Check for cancel reminders ───────────────────────────
             if parse_cancel(text):
                 count = scheduler.cancel_recurring()
+                broadcaster.send({"type": "reminder_cancel", "id": "all"})
                 if count > 0:
                     confirm = f"Done, I cancelled {count} recurring reminder{'s' if count != 1 else ''}."
                 else:
@@ -501,8 +504,6 @@ def main():
             if distraction_monitor:
                 if not distraction_monitor.is_active:
                     llm_prompt = f"[Focus mode is OFF. Respond normally, no focus behavior.] {llm_prompt}"
-                elif distraction_monitor.is_excused:
-                    llm_prompt = f"[Focus mode is ON but paused. The user asked for a break and you allowed it. Be casual.] {llm_prompt}"
                 else:
                     llm_prompt = f"[Focus mode is ON. The user is being monitored for distractions.] {llm_prompt}"
 
@@ -553,12 +554,6 @@ def main():
                 timing += " | [cyan]FOCUS[/cyan]"
             timing += "[/dim]"
             console.print(timing)
-
-            # Check if VLM granted an excuse during focus mode
-            if distraction_monitor and distraction_monitor.is_active and full_resp:
-                if distraction_monitor.check_response_for_excuse(full_resp):
-                    broadcaster.send({"type": "focus", "excused": True})
-                    console.print("  [dim]VLM granted pause — distraction checks paused[/dim]")
 
             broadcaster.send({
                 "type": "done",

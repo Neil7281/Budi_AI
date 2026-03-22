@@ -2,11 +2,10 @@
 
 Activated by voice command ("focus mode", "help me focus", etc.).
 Uses the VLM with multiple camera frames to detect sustained distraction.
-Respects user excuses ("I need to check my phone") and pauses during conversation.
+Pauses during conversation.
 """
 
 import base64
-import re
 import random
 import threading
 import time
@@ -18,14 +17,6 @@ import numpy as np
 from app.config import DistractionConfig
 from app.pipeline import play_audio
 
-# Words in VLM response that indicate it granted a pause/excuse
-_GRANT_PATTERNS = re.compile(
-    r"\b(go ahead|take your time|no problem|of course|sure thing|"
-    r"ill wait|i will wait|ill pause|i will pause|"
-    r"take a break|no worries|alright|okay go|"
-    r"be quick|hurry back|come back|ill be here|i will be here)\b",
-    re.I,
-)
 
 # Smaller resolution for distraction checks — reduces token count significantly
 _DISTRACTION_WIDTH = 320
@@ -60,7 +51,6 @@ class DistractionMonitor:
 
         self._active = False          # focus mode on/off
         self._paused = False          # paused during conversation
-        self._excused_until = 0.0     # timestamp when excuse expires
         self._last_nudge = 0.0        # timestamp of last nudge (for cooldown)
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -69,10 +59,6 @@ class DistractionMonitor:
     @property
     def is_active(self) -> bool:
         return self._active
-
-    @property
-    def is_excused(self) -> bool:
-        return time.monotonic() < self._excused_until
 
     def start(self):
         """Activate focus mode — start background distraction checks."""
@@ -108,13 +94,6 @@ class DistractionMonitor:
         """Resume checks (called after conversation turn ends)."""
         self._paused = False
 
-    def excuse(self, duration: Optional[float] = None):
-        """User asked for a break — pause checks for duration seconds."""
-        dur = duration or self.config.excuse_duration
-        self._excused_until = time.monotonic() + dur
-        if self.console:
-            self.console.print(f"  [dim]Distraction checks paused for {dur:.0f}s[/dim]")
-
     def check_text(self, text: str) -> Optional[str]:
         """Check user text for focus mode triggers. Returns action or None.
 
@@ -133,20 +112,6 @@ class DistractionMonitor:
 
         return None
 
-    def check_response_for_excuse(self, vlm_response: str) -> bool:
-        """Check if the VLM's response indicates it granted a pause.
-
-        Called after the VLM responds during active focus mode.
-        If the VLM said something like 'go ahead' or 'take your time',
-        it means it decided the user's reason is valid — auto-pause.
-        """
-        if not self._active:
-            return False
-        if _GRANT_PATTERNS.search(vlm_response):
-            self.excuse()
-            return True
-        return False
-
     def _check_loop(self):
         """Background loop — runs distraction checks at configured interval."""
         while not self._stop_event.is_set():
@@ -156,10 +121,6 @@ class DistractionMonitor:
 
             # Skip if paused (conversation in progress)
             if self._paused:
-                continue
-
-            # Skip if excused
-            if time.monotonic() < self._excused_until:
                 continue
 
             # Skip if in cooldown after recent nudge

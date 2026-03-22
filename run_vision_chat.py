@@ -334,10 +334,7 @@ def main():
                     )
 
             if distraction_monitor and distraction_monitor.is_active:
-                if distraction_monitor.is_excused:
-                    llm_prompt = f"[Focus mode is ON but paused. The user asked for a break and you allowed it. Be casual.] {text}"
-                else:
-                    llm_prompt = f"[Focus mode is ON. The user is being monitored for distractions.] {text}"
+                llm_prompt = f"[Focus mode is ON. The user is being monitored for distractions.] {text}"
 
             full_resp, dt_llm, ttft = stream_and_speak(
                 llm, tts, llm_prompt, vision_system_prompt, mic.pa_sink,
@@ -347,11 +344,6 @@ def main():
                 max_chunk_words=config.tts.max_chunk_words,
             )
             console.print()
-
-            # Check if VLM granted an excuse during focus mode
-            if distraction_monitor and distraction_monitor.is_active and full_resp:
-                if distraction_monitor.check_response_for_excuse(full_resp):
-                    console.print("  [dim]VLM granted pause — distraction checks paused[/dim]")
 
             timing = f"  [dim]STT {dt_stt:.1f}s | CAM {dt_cam*1000:.0f}ms ({n_imgs} img from buf)"
             if ttft is not None:
