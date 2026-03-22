@@ -1,4 +1,45 @@
-# Reachy Mini Jetson Assistant
+# Budi_AI
+### Productivity companion robot built on top Reachy Mini Jetson Assistant for Embodied AI Hackathon 2026
+
+## Features
+Budi is able to interact with the user and have converations. When instructed, the user may ask Budi to enter Focus Mode. When Budi is in focus mode, it will be actively scanning the environment to see if the user is being distracted such as using a phone. 
+
+Additionally, Budi is able to set and track timed reminders. Ensuring users are ready to future tasks. 
+
+Budi runs runs models and features on the Jetson Orin Nano. 
+
+## Conversation Mode
+Conversation Mode is the default mode of Budi. In this mode, Budi is able to answer questions spoken to it using Whisper. Fun questions include "what do you see?" or asking tricky questions. Budi uses Edger TTS to respond.
+
+### Reminder Scheduling
+Budi is able to track reminders. Users can ask Budi to remind them of certain things given a certain schedule. For example "Budi remind me to take out the trash in 3o seconds".
+
+## Focus Mode
+Budi will be actively checking the user to see if they are distracted using Cosmos Reason VLM. If the user is distracted then Budi will use Edge TTS (Text to Speech) to tell the user to stay focused. The user can deactivate Focus Mode be using one of the deactive trigger phrases. When Focus Mode is deactivated, Budi will return to conversation mode. 
+
+### Triggers
+Start: 
+- "focus mode"
+- "no distraction"
+- "help me focus"
+- "keep me focused"
+- "monitor me"
+
+Stop:
+- "stop focus"
+- "turn off focus"
+- "im done"
+- "end focus"
+- "stop monitoring"
+
+## Tech Stack
+Build on top of Reachy Mini Jetson Assistant which includes: 
+- Reachy Mini SDK
+- Docker
+- Pulse Audio
+- Cosmos Reason 2
+- Gemma
+
 
 <p align="center">
   <a href="https://www.pollen-robotics.com/reachy-mini/"><img src="docs/images/reachy-icon.svg" alt="Reachy Mini Lite" height="180"/></a>
