@@ -38,6 +38,7 @@ class DistractionMonitor:
         config: DistractionConfig,
         pa_sink: Optional[str] = None,
         console=None,
+        on_nudge=None,
     ):
         self.llm = llm
         self.camera = camera
@@ -45,6 +46,7 @@ class DistractionMonitor:
         self.config = config
         self.pa_sink = pa_sink
         self.console = console
+        self.on_nudge = on_nudge
 
         self._active = False          # focus mode on/off
         self._paused = False          # paused during conversation
@@ -222,12 +224,18 @@ class DistractionMonitor:
             return "ERROR"
 
     def _nudge(self):
-        """Speak a random nudge message via TTS."""
+        """Speak a random nudge message via TTS and notify web UI."""
         self._last_nudge = time.monotonic()
         msg = random.choice(self.config.nudge_messages)
 
         if self.console:
             self.console.print(f"  [yellow]Nudge:[/yellow] {msg}")
+
+        if self.on_nudge:
+            try:
+                self.on_nudge(msg)
+            except Exception:
+                pass
 
         if self.tts:
             try:
